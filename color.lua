@@ -1,7 +1,5 @@
 --[[ CoLoR packet dissector
 
-Date: 2021-3-20 version 0.6
-
 Setup:
 If you go to Help –> About Wireshark –> Folders, you’ll find all the folders 
 Wireshark reads Lua scripts from. Choose either the Personal Lua Plugins, 
@@ -95,11 +93,30 @@ local strategy_len = ProtoField.uint8("color.strategy_len", "Length", base.DEC)
 local strategy_value = ProtoField.bytes("color.strategy_value", "Value", base.DASH)
 
 
+-- CONTROL packet
+--[[
+fields defined in GET packet:
+    nid
+fields defined in DATA packet:
+    header_length
+fields defined in ANN packet:
+    aid
+    px
+--]]
+local ctrl_tag = ProtoField.uint8("color.control_tag", "Tag", base.DEC)
+local ctrl_data_len = ProtoField.uint16("color.control_data_len", "Length of Control Message", base.DEC)
+local sk = ProtoField.uint32("color.sk", "SK", base.HEX)
+local ip = ProtoField.ipv4("color.ip", "IP address")
+local security_level = ProtoField.uint8("color.secu_level", "Security Level", base.DEC)
+local list_len = ProtoField.uint8("color.list_len", "Length of List", base.DEC)
+local br_n = ProtoField.uint8("color.br_n", "BR No.", base.DEC)
+
 color_protocol.fields = {version_package, ttl, package_length, header_checksum,
     mtu, pid_num, flags, minimal_pid_cp, n_sid, l_sid, nid, public_key_len, 
     public_key, qos_len, qos_req, seg_id, pid, header_length, pid_pt, nid_provider,
     hmac, data, unit_px_num, as_path_len, aid, px, unit_length, strategy_num,
-    strategy_tag, strategy_len, strategy_value
+    strategy_tag, strategy_len, strategy_value, ctrl_tag, ctrl_data_len, sk, ip,
+    security_level, list_len, br_n
 }
 
 function get_packet_type_name(package)
@@ -110,6 +127,8 @@ function get_packet_type_name(package)
         packet_type_name = "GET"
     elseif package == 3 then
         packet_type_name = "DATA"
+    elseif package == 4 then
+        packet_type_name = "CONTROL"
     end
     return packet_type_name
 end
@@ -122,6 +141,34 @@ function get_flag_am_name(flag_AM)
         name = "UPDATE"
     elseif flag_AM == 3 then
         name = "REMOVE"
+    end
+    return name
+end
+
+function get_ctrl_tag_name(tag_value)
+    local name = "Undefined"
+    if tag_value == 1 then
+        name = "CONFIG_RM"
+    elseif tag_value == 2 then
+        name = "CONFIG_RM_ACK"
+    elseif tag_value == 3 then
+        name = "CONFIG_BR"
+    elseif tag_value == 4 then
+        name = "CONFIG_BR_ACK"
+    elseif tag_value == 5 then
+        name = "PROXY_REGISTER"
+    elseif tag_value == 6 then
+        name = "PROXY_REGISTER_REPLY"
+    elseif tag_value == 7 then
+        name = "PROXY_REGISTER_REPLY_ACK"
+    elseif tag_value == 8 then
+        name = "CONFIG_PROXY"
+    elseif tag_value == 9 then
+        name = "CONFIG_PROXY_ACK"
+    elseif tag_value == 10 then
+        name = "CONFIG_RM_STRATEGY"
+    elseif tag_value == 11 then
+        name = "CONFIG_RM_STRATEGY_ACK"
     end
     return name
 end
@@ -195,8 +242,130 @@ function color_protocol.dissector(buffer, pinfo, tree)
                             " = Package: " .. buffer(0, 1):bitfield(4, 4) ..
                             " (" .. packet_type_name .. ")"
     subtree:add_le(version_package, buffer(0, 1)):set_text(packet_type_str)
-
     subtree:add_le(ttl, buffer(1, 1))
+
+    if packet_type_name == "CONTROL" then
+        local hdr_len = buffer(4, 1):le_uint()
+        local calculated_cksum = cksum(buffer, hdr_len)
+        local cksum_item = subtree:add_le(header_checksum, buffer(2, 2))
+        if calculated_cksum == buffer(2, 2):le_uint() then
+            cksum_item:append_text(" [correct]")
+        else
+            cksum_item:append_text(" [incorrect]")
+        end
+        subtree:add_le(header_checksum, buffer(2, 2)):set_text("[Calculated Checksum: " ..
+            string.format("0x%04x", calculated_cksum) .. "]")
+        subtree:add_le(header_length, buffer(4, 1)):append_text(" bytes")
+        local ctrl_tag_value = buffer(5, 1):le_uint()
+        local ctrl_tag_str = get_ctrl_tag_name(ctrl_tag_value)
+        subtree:add_le(ctrl_tag, buffer(5, 1)):append_text(" (" .. ctrl_tag_str .. ")")
+        subtree:add_le(ctrl_data_len, buffer(6, 2)):append_text(" bytes")
+        if ctrl_tag_str == "CONFIG_RM" then
+            subtree:add_le(nid, buffer(8, 16))
+            subtree:add_le(aid, buffer(24, 1))
+            subtree:add_le(security_level, buffer(25, 1))
+            subtree:add_le(sk, buffer(26, 4))
+            local br_list_num = buffer(30, 1):le_uint()
+            subtree:add_le(list_len, buffer(30, 1)):set_text("Length of BR List: " .. br_list_num)
+            local offset = 31
+            for i = 1, br_list_num do
+                local br_info_subtree = subtree:add_le(color_protocol, buffer(offset, 21), "BR Info Item")
+                br_info_subtree:add_le(br_n, buffer(offset, 1))
+                br_info_subtree:add_le(nid, buffer(offset + 1, 16))
+                br_info_subtree:add_le(ip, buffer(offset + 17, 4))
+                offset = offset + 21
+            end
+            local as_br_px_num = buffer(offset, 1):le_uint()
+            subtree:add_le(list_len, buffer(offset, 1)):set_text("Length of AS-BR-PX List: " .. as_br_px_num)
+            offset = offset + 1
+            for i = 1, as_br_px_num do
+                -- calculate the length of the item
+                local abp_item_len = 3 -- aid, security_level, br_px_num
+                local br_px_num = buffer(offset + 2, 1):le_uint()
+                for j = 1, br_px_num do
+                    abp_item_len = abp_item_len + 1 -- br_n
+                    local num_px = buffer(offset + abp_item_len, 1):le_uint()
+                    abp_item_len = abp_item_len + 1 + num_px * 2 -- num_px, px
+                end
+                 --End of calculate the length of the item
+                local abp_subtree = subtree:add_le(color_protocol, buffer(offset, abp_item_len), "AS-BR-PX Item")
+                abp_subtree:add_le(aid, buffer(offset, 1))
+                offset = offset + 1
+                abp_subtree:add_le(security_level, buffer(offset, 1))
+                offset = offset + 1
+                abp_subtree:add_le(list_len, buffer(offset, 1)):set_text("Length of BR-PX List: " .. br_px_num)
+                offset = offset + 1
+                for j = 1, br_px_num do
+                    -- calculate the length of br_px item
+                    local num_px = buffer(offset + 1, 1):le_uint()
+                    local bp_item_len = 2 + num_px * 2
+                    --End of calculate the length of br_px item
+
+                    local bp_subtree = abp_subtree:add_le(color_protocol, buffer(offset, bp_item_len), "BR-PX Item")
+                    bp_subtree:add_le(br_n, buffer(offset, 1))
+                    offset = offset + 1
+                    bp_subtree:add_le(list_len, buffer(offset, 1)):set_text("Number of PXs: " .. num_px)
+                    offset = offset + 1
+                    for k = 1, num_px do
+                        bp_subtree:add_le(px, buffer(offset, 2)):set_text("PX " .. k .. ": " .. 
+                            string.format("0x%04x", buffer(offset, 2):le_uint()))
+                    end
+                end
+            end
+        elseif ctrl_tag_str == "CONFIG_RM_ACK" then
+            -- No data
+        elseif ctrl_tag_str == "CONFIG_BR" then
+            subtree:add_le(nid, buffer(8, 16))
+            subtree:add_le(sk, buffer(24, 4))
+            local api_item_len = buffer(28, 1):le_uint()
+            subtree:add_le(list_len, buffer(28, 1)):set_text("Length of AS-PX-IP List: " .. api_item_len)
+            local offset = 29
+            for i = 1, api_item_len do
+                local api_subtree = subtree:add_le(color_protocol, buffer(offset, 7), "AS-PX_IP Item")
+                api_subtree:add_le(aid, buffer(offset, 1))
+                api_subtree:add_le(px, buffer(offset + 1, 2))
+                api_subtree:add_le(ip, buffer(offset + 3, 4))
+                offset = offset + 7
+            end
+        elseif ctrl_tag_str == "CONFIG_BR_ACK" then
+            -- No data
+        elseif ctrl_tag_str == "PROXY_REGISTER" then
+            subtree:add_le(ip, buffer(8, 4))
+            subtree:add_le(nid, buffer(12, 16))
+        elseif ctrl_tag_str == "PROXY_REGISTER_REPLY" then
+            local nid_ip_num = buffer(8, 1):le_uint()
+            subtree:add_le(list_len, buffer(8, 1)):set_text("Length of NID-IP List: " .. nid_ip_num)
+            local offset = 9
+            for i = 1, nid_ip_num do
+                local nid_ip_subtree = subtree:add_le(color_protocol, buffer(offset, 20), "NID-IP Item")
+                nid_ip_subtree:add_le(nid, buffer(offset, 16))
+                nid_ip_subtree:add_le(ip, buffer(offset + 16, 4))
+                offset = offset + 20
+            end
+            local px_ip_num = buffer(offset, 1):le_uint()
+            subtree:add_le(list_len, buffer(offset, 1)):set_text("Length of PX-IP List: " .. px_ip_num)
+            offset = offset + 1
+            for i = 1, px_ip_num do
+                local px_ip_subtree = subtree:add_le(color_protocol, buffer(offset, 6), "PX-IP Item")
+                px_ip_subtree:add_le(px, buffer(offset, 2))
+                px_ip_subtree:add_le(ip, buffer(offset + 2, 4))
+                offset = offset + 6
+            end
+        elseif ctrl_tag_str == "PROXY_REGISTER_REPLY_ACK" then
+            -- No data
+        elseif ctrl_tag_str == "CONFIG_PROXY" then
+            subtree:add_le(ip, buffer(8, 4))
+            subtree:add_le(nid, buffer(12, 16))
+        elseif ctrl_tag_str == "CONFIG_PROXY_ACK" then
+            -- No data
+        elseif ctrl_tag_str == "CONFIG_RM_STRATEGY" then
+            subtree:add_le(color_protocol, buffer(8)):set_text("Not supported!")
+        elseif ctrl_tag_str == "CONFIG_RM_STRATEGY_ACK" then
+            -- No data
+        end
+        return 
+    end --End of CONTROL packet
+
     local package_length_value = buffer(2, 2):le_uint()
     subtree:add_le(package_length, buffer(2, 2)):append_text(" bytes")
 

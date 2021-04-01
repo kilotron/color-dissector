@@ -5,9 +5,8 @@ CoLoR dissector is capable of dissecting the following packet
 - ANN packet
 - GET packet
 - DATA packet
+- CONTROL packet
 
-Support for CONTROL packet will be added later.
-  
 ## Setup
 1. Go to Help –> About Wireshark –> Folders. 
 2. Choose either the Personal Lua Plugins, Global Lua Plugins or Personal configuration folder. E.g. C:\Program Files\Wireshark\plugins\2.6 on Windows. 
