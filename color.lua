@@ -199,13 +199,14 @@ function flag_description(flag, position, desc)
 end
 
 -- Checksum for CoLoR packet only
-function cksum(buffer, len)
+-- checksum_offset: the offset of checksum field
+function cksum(buffer, len, checksum_offset)
     local sum = 0
     local position = 0
     while len > 1 do
         -- If you remove the following if statement,
         -- the checksum is correct if it equals 0xffff.
-        if position ~= 4 then
+        if position ~= checksum_offset then
             sum = sum + buffer(position, 2):le_uint()
         end
         len = len - 2
@@ -246,7 +247,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
 
     if packet_type_name == "CONTROL" then
         local hdr_len = buffer(4, 1):le_uint()
-        local calculated_cksum = cksum(buffer, hdr_len)
+        local calculated_cksum = cksum(buffer, hdr_len, 2)
         local cksum_item = subtree:add_le(header_checksum, buffer(2, 2))
         if calculated_cksum == buffer(2, 2):le_uint() then
             cksum_item:append_text(" [correct]")
@@ -381,7 +382,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
     if packet_type_name == "DATA" then
         hdr_len = buffer(6, 1):le_uint()
     end
-    local calculated_cksum = cksum(buffer, hdr_len)
+    local calculated_cksum = cksum(buffer, hdr_len, 4)
     local cksum_item = subtree:add_le(header_checksum, buffer(4, 2))
     if calculated_cksum == buffer(4, 2):le_uint() then
         cksum_item:append_text(" [correct]")
