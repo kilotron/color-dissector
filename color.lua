@@ -259,6 +259,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
         subtree:add_le(header_length, buffer(4, 1)):append_text(" bytes")
         local ctrl_tag_value = buffer(5, 1):le_uint()
         local ctrl_tag_str = get_ctrl_tag_name(ctrl_tag_value)
+        pinfo.cols.info = 'CONTROL packet: ' .. ctrl_tag_str
         subtree:add_le(ctrl_tag, buffer(5, 1)):append_text(" (" .. ctrl_tag_str .. ")")
         subtree:add_le(ctrl_data_len, buffer(6, 2)):append_text(" bytes")
         if ctrl_tag_str == "CONFIG_RM" then
@@ -393,6 +394,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
         string.format("0x%04x", calculated_cksum) .. "]")
 
     if packet_type_name == "GET" then
+        pinfo.cols.info = "GET packet"
         local offset = 64
         local buffer_length = buffer:len()
         if buffer_length < offset then
@@ -494,6 +496,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
 
         if flag_S == 1 then
             subtree:add_le(seg_id, buffer(offset, 4))
+            pinfo.cols.info:append(', Segment ID: ' .. string.format('0x%08x', buffer(offset, 4):le_uint()))
             offset = offset + 4
         end
 
@@ -506,6 +509,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
             offset = offset + 4
         end
     elseif packet_type_name == "DATA" then
+        pinfo.cols.info = "DATA packet"
         local buffer_length = buffer:len()
         if buffer_length < 60 then
             subtree:add_le(color_protocol, buffer(), "MALFORMED PACKET: length" ..
@@ -521,9 +525,6 @@ function color_protocol.dissector(buffer, pinfo, tree)
         subtree:add_le(pid_num, buffer(8, 1))
 
         -- Flags
-        local flag_subtree = subtree:add_le(color_protocol, buffer(9, 1), "Flags")
-        flag_subtree:append_text(string.format(": 0x%02x", buffer(9, 1):le_uint()))
-
         local flag_F = buffer(9, 1):bitfield(0)
         local flag_B = buffer(9, 1):bitfield(1)
         local flag_R = buffer(9, 1):bitfield(2)
@@ -532,6 +533,13 @@ function color_protocol.dissector(buffer, pinfo, tree)
         local flag_C = buffer(9, 1):bitfield(5)
         local flag_S = buffer(9, 1):bitfield(6)
 
+        local flag_subtree = subtree:add_le(color_protocol, buffer(9, 1), "Flags")
+        if flag_B == 1 then
+            pinfo.cols.info:append(" (ACK)")
+            flag_subtree:append_text(string.format(": 0x%02x (ACK)", buffer(9, 1):le_uint()))
+        else
+            flag_subtree:append_text(string.format(": 0x%02x", buffer(9, 1):le_uint()))
+        end
 
         local flag_F_text = flag_description(flag_F, 0, "From other domain")
         local flag_B_text = flag_description(flag_B, 1, "ACK packet")
@@ -636,6 +644,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
 
         if flag_S == 1 then
             subtree:add_le(seg_id, buffer(offset, 4))
+            pinfo.cols.info:append(', Segment ID: ' .. string.format('0x%08x', buffer(offset, 4):le_uint()))
             offset = offset + 4
         end
 
@@ -672,6 +681,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
         end
 
     elseif packet_type_name == "ANN" then
+        pinfo.cols.info = "ANN"
         buffer_length = buffer:len()
         if buffer_length < 8 then
             subtree:add_le(color_protocol, buffer(), "MALFORMED PACKET: length" ..
