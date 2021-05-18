@@ -110,9 +110,6 @@ local ip = ProtoField.ipv4("color.ip", "IP address")
 local security_level = ProtoField.uint8("color.secu_level", "Security Level", base.DEC)
 local list_len = ProtoField.uint8("color.list_len", "Length of List", base.DEC)
 local br_n = ProtoField.uint8("color.br_n", "BR No.", base.DEC)
-local aw_tag = ProtoField.uint8("color.aw_tag", "Tag", base.DEC)
-local aw_len = ProtoField.uint8("color.aw_len", "Length", base.DEC)
-local aw_data = ProtoField.uint8("color.aw_data", "DATA", base.DEC)
 local aw_asid = ProtoField.uint8("color.aw_asid", "ASID", base.DEC)
 local aw_num = ProtoField.uint32("color.aw_num", "Number", base.DEC)
 
@@ -121,7 +118,7 @@ color_protocol.fields = {version_package, ttl, package_length, header_checksum,
     public_key, qos_len, qos_req, seg_id, pid, header_length, pid_pt, nid_provider,
     hmac, data, unit_px_num, as_path_len, aid, px, unit_length, strategy_num,
     strategy_tag, strategy_len, strategy_value, ctrl_tag, ctrl_data_len, sk, ip,
-    security_level, list_len, br_n, aw_tag, aw_len, aw_data, aw_asid, aw_num
+    security_level, list_len, br_n, aw_asid, aw_num
 }
 
 function get_packet_type_name(package)
@@ -365,39 +362,18 @@ function color_protocol.dissector(buffer, pinfo, tree)
             subtree:add_le(color_protocol, buffer(8, 20), "IP header")
             subtree:add_le(color_protocol, buffer(28), "DATA header")
         elseif ctrl_tag_str == "ATTACK_WARNING" then
+            if (ctrl_data_len_value < 16 or (ctrl_data_len_value - 16) % 5 ~= 0) then
+                subtree:add_le(color_protocol, buffer(6, 2), 
+                    "[Incorrect length]: Length should be more than 16 and (Length - 16) is multiples of 5.")
+                return
+            end
             subtree:add_le(nid, buffer(8, 16))
             local aw_offset = 24
             while aw_offset < buffer:len() do
-                local aw_tag_value = buffer(aw_offset, 1):le_uint()
-                local aw_len_value = buffer(aw_offset + 1, 1):le_uint()
-                if aw_tag_value == 1 then
-                    local aw_subtree = subtree:add_le(color_protocol, buffer(aw_offset, aw_len_value + 2), "AS Attack Summary")
-                    aw_subtree:add_le(aw_tag, buffer(aw_offset, 1))
-                    if aw_len_value ~= 5 then
-                        aw_subtree:add_le(color_protocol, buffer(aw_offset + 1, 1), "[Incorrect length]: should be 5")
-                        return
-                    end
-                    aw_subtree:add_le(aw_len, buffer(aw_offset + 1, 1))
-                    aw_subtree:add_le(aw_asid, buffer(aw_offset + 2, 1))
-                    aw_subtree:add_le(aw_num, buffer(aw_offset + 3, 4))
-                    aw_offset = aw_offset + aw_len_value + 2
-                elseif aw_tag_value == 2 then
-                    local aw_subtree = subtree:add_le(color_protocol, buffer(aw_offset, aw_len_value + 2), "Unknown Attack Summary")
-                    aw_subtree:add_le(aw_tag, buffer(aw_offset, 1))
-                    if aw_len_value ~= 4 then
-                        aw_subtree:add_le(color_protocol, buffer(aw_offset + 1, 1), "[Incorrect length]: should be 4")
-                        return
-                    end
-                    aw_subtree:add_le(aw_len, buffer(aw_offset + 1, 1))
-                    aw_subtree:add_le(aw_num, buffer(aw_offset + 2, 4))
-                    aw_offset = aw_offset + aw_len_value + 2
-                else
-                    local aw_subtree = subtree:add_le(color_protocol, buffer(aw_offset, aw_len_value + 2), "Undefined Warning")
-                    aw_subtree:add_le(aw_tag, buffer(aw_offset, 1))
-                    aw_subtree:add_le(aw_len, buffer(aw_offset + 1, 1))
-                    aw_subtree:add_le(aw_data, buffer(aw_offset + 2, 1))
-                    aw_offset = aw_offset + aw_len_value + 2
-                end
+                aw_subtree = subtree:add_le(color_protocol, buffer(aw_offset, 5), "AS Attack Summary")
+                aw_subtree:add_le(aw_asid, buffer(aw_offset, 1))
+                aw_subtree:add_le(aw_num, buffer(aw_offset + 1, 4))
+                aw_offset = aw_offset + 5
             end -- end of while
         end -- elseif ctrl_tag_str == "ATTACK_WARNING"
         return 
