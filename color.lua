@@ -461,7 +461,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
                 " less than " .. (offset + 1).. " bytes")
                 return
             end
-            qos_len_value = buffer(offset, 1):le_uint()
+            qos_len_value = buffer(offset, 1):le_uint() / 8
             offset = offset + 1 + qos_len_value
         end
 
