@@ -649,6 +649,9 @@ function color_protocol.dissector(buffer, pinfo, tree)
             offset = offset + 16
             subtree:add_le(nid_provider, buffer(offset, 16))
             offset = offset + 16
+        else
+        	subtree:add_le(nid_consumer, buffer(offset, 16))
+            offset = offset + 16
         end
 
         -- TODO：test optional fields 
