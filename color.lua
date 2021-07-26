@@ -59,6 +59,7 @@ local pid = ProtoField.uint32("color.pid", "PID", base.HEX)
 local header_length = ProtoField.uint8("color.header_len", "Header Length", base.DEC)
 local pid_pt = ProtoField.uint8("color.pid_pt", "PID pointer", base.DEC)
 local nid_provider = ProtoField.bytes("color.nid", "NID of Provider", base.DASH)
+local nid_consumer = ProtoField.bytes("color.nid", "NID of Consumer", base.DASH)
 --[[
 fields defined in GET packet:
     pid_num
@@ -118,7 +119,7 @@ color_protocol.fields = {version_package, ttl, package_length, header_checksum,
     public_key, qos_len, qos_req, seg_id, pid, header_length, pid_pt, nid_provider,
     hmac, data, unit_px_num, as_path_len, aid, px, unit_length, strategy_num,
     strategy_tag, strategy_len, strategy_value, ctrl_tag, ctrl_data_len, sk, ip,
-    security_level, list_len, br_n, aw_asid, aw_num
+    security_level, list_len, br_n, aw_asid, aw_num, nid_consumer
 }
 
 function get_packet_type_name(package)
@@ -580,8 +581,12 @@ function color_protocol.dissector(buffer, pinfo, tree)
 
         offset = offset + 52
 
-        -- provider nid
-        if flag_B == 0 and flag_R == 1 then
+        
+        if flag_B == 1 then
+            -- ACK packet carries consumer's NID
+            offset = offset + 16
+        elseif flag_B == 0 and flag_R == 1 then
+            -- provider's NID
             offset = offset + 16
         end
 
@@ -631,10 +636,17 @@ function color_protocol.dissector(buffer, pinfo, tree)
         offset = offset + 16
         subtree:add_le(l_sid, buffer(offset, 20))
         offset = offset + 20
-        subtree:add_le(nid, buffer(offset, 16))
-        offset = offset + 16
-
-        if flag_B == 0 and flag_R == 1 then
+        
+        if flag_B == 1 then
+            -- ACK packet has nid_consumer field
+            subtree:add_le(nid_provider, buffer(offset, 16)) -- destination
+            offset = offset + 16
+            subtree:add_le(nid_consumer, buffer(offset, 16))
+            offset = offset + 16
+        elseif flag_B == 0 and flag_R == 1 then
+            -- Normal DATA packet with reserved PID has nid_provider field
+            subtree:add_le(nid_consumer, buffer(offset, 16)) -- destination
+            offset = offset + 16
             subtree:add_le(nid_provider, buffer(offset, 16))
             offset = offset + 16
         end
