@@ -238,7 +238,8 @@ function color_protocol.dissector(buffer, pinfo, tree)
 
     if packet_type_name == "CONTROL" then
         local hdr_len = buffer(4, 1):le_uint()
-        local calculated_cksum = cksum(buffer, hdr_len, 2)
+        local ctrl_data_len_value = buffer(6, 2):le_uint()
+        local calculated_cksum = cksum(buffer, hdr_len + ctrl_data_len_value, 2)
         local cksum_item = subtree:add_le(header_checksum, buffer(2, 2))
         if calculated_cksum == buffer(2, 2):le_uint() then
             cksum_item:append_text(" [correct]")
@@ -253,7 +254,6 @@ function color_protocol.dissector(buffer, pinfo, tree)
         pinfo.cols.info = 'CONTROL packet: ' .. ctrl_tag_str
         subtree:add_le(ctrl_tag, buffer(5, 1)):append_text(" (" .. ctrl_tag_str .. ")")
         subtree:add_le(ctrl_data_len, buffer(6, 2)):append_text(" bytes")
-        local ctrl_data_len_value = buffer(6, 2):le_uint()
         if ctrl_tag_str == "CONFIG_RM" then
             subtree:add_le(nid, buffer(8, 16))
             subtree:add_le(aid, buffer(24, 1))
@@ -281,7 +281,7 @@ function color_protocol.dissector(buffer, pinfo, tree)
                     local num_px = buffer(offset + abp_item_len, 1):le_uint()
                     abp_item_len = abp_item_len + 1 + num_px * 2 -- num_px, px
                 end
-                 --End of calculate the length of the item
+                --End of calculate the length of the item
                 local abp_subtree = subtree:add_le(color_protocol, buffer(offset, abp_item_len), "AS-BR-PX Item")
                 abp_subtree:add_le(aid, buffer(offset, 1))
                 offset = offset + 1
@@ -332,8 +332,8 @@ function color_protocol.dissector(buffer, pinfo, tree)
             local offset = 9
             for i = 1, nid_ip_num do
                 local nid_ip_subtree = subtree:add_le(color_protocol, buffer(offset, 20), "NID-IP Item")
-                nid_ip_subtree:add_le(nid, buffer(offset, 16))
-                nid_ip_subtree:add_le(ip, buffer(offset + 16, 4))
+                nid_ip_subtree:add_le(ip, buffer(offset, 4))
+                nid_ip_subtree:add_le(nid, buffer(offset + 4, 16))
                 offset = offset + 20
             end
             local px_ip_num = buffer(offset, 1):le_uint()
